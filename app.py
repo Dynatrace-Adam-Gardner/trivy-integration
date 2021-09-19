@@ -23,8 +23,21 @@ os.environ["TRIVY_NEW_JSON_SCHEMA"] = "true"
 TRIVY_SECURITY = os.getenv('TRIVY_SECURITY', 'UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL')
 IMAGE = os.getenv('IMAGE')
 TAG = os.getenv('TAG')
-METRICS_ENDPOINT = os.getenv('METRICS_ENDPOINT')
-METRICS_API_TOKEN = os.getenv('METRICS_API_TOKEN')
+METRICS_ENDPOINT = os.getenv('METRICS_ENDPOINT','')
+METRICS_API_TOKEN = os.getenv('METRICS_API_TOKEN','')
+DEBUG = os.getenv('DEBUG', False)
+
+if IMAGE == None or TAG == None:
+  print('IMAGE and / or TAG environment variables not provided. Please set and re-run.')
+  exit()
+if METRICS_ENDPOINT == '' or METRICS_API_TOKEN == '':
+  print('METRICS_ENDPOINT and/or METRICS_API_TOKEN environment variables not set. Tool will still work but metrics will not be pushed to a backend.')
+
+if DEBUG:
+  print(TRIVY_SECURITY)
+  print(IMAGE)
+  print(TAG)
+  print(METRICS_ENDPOINT)
 
 security_levels_array = TRIVY_SECURITY.split(',')
 
@@ -39,14 +52,27 @@ for level in security_levels_array:
     }
     security_items.append(level_dict)
 
-trivy_command_line_severity = "--severity=" + TRIVY_SECURITY
-trivy_command_line_image_tag = IMAGE + ":" + TAG
+#trivy_command_line_severity = "--severity=" + 
+#trivy_command_line_image_tag = IMAGE + ":" + TAG
+#trivy_command_line = f"./trivy image --no-progress --format=json {trivy_command_line_severity} {trivy_command_line_image_tag}"
+trivy_command_line = f"./trivy --cache-dir=/tmp/trivycache image --no-progress --format=json --severity={TRIVY_SECURITY} {IMAGE}:{TAG}"
+
+if DEBUG:
+  print(trivy_command_line)
 
 # Run trivy and capture std output. Then transform stdout into JSON object trivy_results_json
 # eg. ./trivy image --format=json --output=trivy_output_tmp.json --severity=CRITICAL nginx:1.21.1
-sp_output = subprocess.run(["./trivy", "image", "--no-progress" ,"--format=json", trivy_command_line_severity, trivy_command_line_image_tag], capture_output=True)
+#print('./trivy image --no-progress --format=json' + trivy_command_line_severity + " - " + trivy_command_line_image_tag)
+trivy_output = subprocess.run([trivy_command_line], capture_output=True, shell=True)
+
 # This is the JSON result but includes some irrelevant lines at the top
-stdout_as_str = sp_output.stdout.decode("utf-8")
+stdout_as_str = trivy_output.stdout.decode("utf-8")
+if DEBUG:
+  print(stdout_as_str)
+
+if '{' not in stdout_as_str:
+  exit()
+
 # substring to remove irrelevant details
 index_of_opening_curly_brace = stdout_as_str.index('{')
 json_output = stdout_as_str[index_of_opening_curly_brace:]
@@ -57,13 +83,16 @@ total_vulns_count = 0
 
 # Loop through results and get number of vulnerabilities for each result
 results = trivy_results_json['Results']
-#print('Number of results: ' + str(len(results)))
+
+if DEBUG:
+  print('Number of results: ' + str(len(results)))
 
 for result in results:
   for item in security_items:
     level_to_check = item['level']
     vuln_count = item['vulnerabilities']
-    #print("Counting" + level_to_check + "Vulnerabilities")
+    if DEBUG:
+      print("Counting" + level_to_check + "Vulnerabilities")
 
     for vuln in result['Vulnerabilities']:
       #print(vuln['Severity'])
@@ -76,35 +105,42 @@ for result in results:
     item['vulnerabilities'] = vuln_count
 
 print('Finished. Total Vulnerability Count: ' + str(total_vulns_count))
-print('Finished. Output total vuln counts from list')
-for item in security_items:
-  print(item)
+if DEBUG:
+  for item in security_items:
+    print(item)
 
 # Output result to monitoring provider
-#print(METRICS_ENDPOINT)
+if DEBUG:
+  print(METRICS_ENDPOINT)
 
-metrics_endpoint = METRICS_ENDPOINT+"/api/v2/metrics/ingest"
+if METRICS_ENDPOINT != None and METRICS_API_TOKEN != None:
+  metrics_endpoint = METRICS_ENDPOINT+"/api/v2/metrics/ingest"
 
-#print(metrics_endpoint)
+  if DEBUG:
+    print(metrics_endpoint)
 
-headers = {
-  "Authorization": "Api-Token " + METRICS_API_TOKEN
-}
+  headers = {
+    "Authorization": "Api-Token " + METRICS_API_TOKEN
+  }
 
-# Build payload
-# Loop through each vuln and add a new line for it
-# We will push all metrics onto the same key and split by a dimension
+  # Build payload
+  # Loop through each vuln and add a new line for it
+  # We will push all metrics onto the same key and split by a dimension
 
-# First push the total
-payload = "trivy.vulnerabilities.total,image="+IMAGE+",tag="+TAG+" " + str(total_vulns_count) + "\n"
+  # First push the total
+  payload = "trivy.vulnerabilities.total,image="+IMAGE+",tag="+TAG+" " + str(total_vulns_count) + "\n"
 
-# Now add severities one by one
-for item in security_items:
-  severity = item['level']
-  vuln_count = item['vulnerabilities']
+  # Now add severities one by one
+  for item in security_items:
+    severity = item['level']
+    vuln_count = item['vulnerabilities']
 
-  payload += "trivy.vulnerabilities."+severity+",image="+IMAGE+",tag="+TAG+" " + str(vuln_count) + "\n"
+    payload += "trivy.vulnerabilities."+severity+",image="+IMAGE+",tag="+TAG+" " + str(vuln_count) + "\n"
 
-#print(payload)
-response = requests.post(url=metrics_endpoint, headers=headers, data=payload)
-print(response.status_code)
+  if DEBUG:
+    print(payload)
+
+  response = requests.post(url=metrics_endpoint, headers=headers, data=payload)
+  print(response.status_code)
+else:
+  print('METRICS_ENDPOINT and/or METRICS_API_TOKEN not set. Tool will still work but metrics will not be pushed to a backend.')
