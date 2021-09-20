@@ -7,6 +7,8 @@ import requests
 # TRIVY_SECURITY  (see below)
 # IMAGE  eg. 'IMAGE=nginx'
 # TAG    eg. 'TAG=1.21.1'
+#
+# Optional Environment variables
 # METRICS_ENDPOINT eg. METRICS_ENDPOINT=https://abc123.live.dynatrace.com
 # METRICS_API_TOKEN eg. METRICS_API_TOKEN=dtc01.***
 #
@@ -30,8 +32,6 @@ DEBUG = os.getenv('DEBUG', False)
 if IMAGE == None or TAG == None:
   print('IMAGE and / or TAG environment variables not provided. Please set and re-run.')
   exit()
-if METRICS_ENDPOINT == '' or METRICS_API_TOKEN == '':
-  print('METRICS_ENDPOINT and/or METRICS_API_TOKEN environment variables not set. Tool will still work but metrics will not be pushed to a backend.')
 
 if DEBUG:
   print(TRIVY_SECURITY)
@@ -113,7 +113,7 @@ if DEBUG:
 if DEBUG:
   print(METRICS_ENDPOINT)
 
-if METRICS_ENDPOINT != None and METRICS_API_TOKEN != None:
+if METRICS_ENDPOINT != '' and METRICS_API_TOKEN != '':
   metrics_endpoint = METRICS_ENDPOINT+"/api/v2/metrics/ingest"
 
   if DEBUG:
